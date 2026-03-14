@@ -1,1 +1,3 @@
 .vscode
+.cache
+._pycache_
