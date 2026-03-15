@@ -6,10 +6,10 @@ from utils import fetch_f1_data
 
 fastf1.Cache.enable_cache('cache')
 
-st.set_page_config(page_title="Plotting Demo", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Summary", page_icon="📊", layout="wide")
 
-st.markdown("# Plotting Demo")
-st.sidebar.header("Plotting Demo")
+st.markdown("# Session Summary")
+# st.sidebar.header("Plotting Demo")
 
 
 

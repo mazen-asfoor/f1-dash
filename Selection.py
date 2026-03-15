@@ -27,7 +27,7 @@ if 'default_year' not in st.session_state:
 
 
 # page layout:
-welcome = st.title('Hello World')
+welcome = st.title('F1 Insightfully: F1 Session Dashboard')
 
 
 # with st.form(key='select_event'):
@@ -57,10 +57,8 @@ if 'default_year' not in st.session_state:
     st.session_state.default_year = years[-1]
     
 
-# if st.button("Go to Page Two"):
     
 if pressed:
     with st.spinner('This may take a couple of seconds...'):
         session = fetch_f1_data(year_selected, location, event[0])
         st.switch_page("pages/1_Summary.py")
-    # st.dataframe(session.results)
