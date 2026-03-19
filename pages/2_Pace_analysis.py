@@ -4,6 +4,7 @@ import fastf1
 from utils import fetch_f1_data
 import fastf1.plotting as fastplt
 import plotly.express as px
+import numpy as np
 
 
 fastf1.Cache.enable_cache('cache')
@@ -30,31 +31,33 @@ session = fetch_f1_data(st.session_state.selected_year, st.session_state.gp, st.
 
 teams = session.results[['Abbreviation', 'TeamName']].set_index('Abbreviation').to_dict()['TeamName']
 
-lap_pace = session.laps.pick_accurate()[['Driver', 'Stint', 'Compound', 'DriverNumber', 'LapTime']]
+laps = session.laps.pick_accurate()[['Driver', 'Stint', 'Compound', 'DriverNumber', 'SpeedST', 'LapTime', 'TyreLife']]
 
-lap_pace['LapTime'] = lap_pace['LapTime'].dt.total_seconds()
-lap_pace['Team'] = lap_pace.Driver.map(teams)
+laps['LapTime'] = laps['LapTime'].dt.total_seconds()
+laps['Team'] = laps.Driver.map(teams)
 
-average_pace = lap_pace.groupby('Driver')['LapTime'].mean().sort_values()
+average_pace = laps.groupby('Driver')['LapTime'].mean().sort_values()
 
-colors = {}
-for d in lap_pace.Driver.unique():
-    team = lap_pace[lap_pace.Driver == d]['Team'].iloc[0]
-    colors[team] = fastplt.get_team_color(team, session)
+team_colors = {}
+driver_team = {}
+for d in laps.Driver.unique():
+    team = laps[laps.Driver == d]['Team'].iloc[0]
+    driver_team[d] = team
+    team_colors[team] = fastplt.get_team_color(team, session)
 
-lap_pace['color'] = lap_pace.Team.map(colors)
+laps['color'] = laps.Team.map(team_colors)
 
 
 keys = {}
 for driv in average_pace.index.to_list():
     keys[driv] = average_pace.index.to_list().index(driv)
-lap_pace = lap_pace.sort_values(by='Driver', key=lambda x: x.map(keys)).reset_index(drop=True)
+laps = laps.sort_values(by='Driver', key=lambda x: x.map(keys)).reset_index(drop=True)
 
-color_map = dict(zip(lap_pace['Driver'], lap_pace['color']))
+driver_color_map = dict(zip(laps['Driver'], laps['color']))
 
 
 
-def create_ticks(df=lap_pace):
+def create_ticks(df=laps):
     ticks = []
 
     for d in df.Driver.unique():
@@ -94,21 +97,31 @@ def pace_box(tcks = average_pace.index):
 
     # 2. Generate the plot
     fig = px.box(
-        lap_pace, 
+        laps, 
         x="Driver", 
         y="LapTime", 
         color="Driver",
-        color_discrete_map=color_map, 
-        hover_data=lap_pace.columns,
+        color_discrete_map=driver_color_map, 
+        hover_data=laps.columns,
         title='Pace distribution'
     )
     fig.update_traces(boxmean=True)
     fig.update_xaxes(title_text = '',
                     tickmode = 'array',
-                    tickvals= list(range(len(lap_pace.Driver.unique()))),
+                    tickvals= list(range(len(laps.Driver.unique()))),
                     ticktext = tcks,
                     tickangle=0)
     fig.update_yaxes(title_text = 'Lap Time (seconds)')
+
+    fig.update_layout(
+    margin=dict(
+        l=10,  # Left margin
+        r=10,  # Right margin
+        t=40,  # Top margin (leave a bit for the title if needed)
+        b=10   # Bottom margin
+    ),
+    autosize=True
+)
 
     return fig
 
@@ -116,28 +129,63 @@ def pace_box(tcks = average_pace.index):
 st.plotly_chart(pace_box(tcks=create_ticks()))
 
 
-def consistency():
-    cons = lap_pace.groupby('Driver')['LapTime'].std().sort_values(ascending=False)
-    consistency_fig = px.bar(x=cons.values, y=cons.index, color=cons.index, color_discrete_map=color_map, title='Consistency of laptimes')
-    consistency_fig.update_traces(width=0.8)
-    consistency_fig.update_layout(
+consistency = laps.groupby('Driver')['LapTime'].std().sort_values(ascending=False)
+def plotly_barh(df, title, xlbl, ylbl, xlim, color_map):
+    fig = px.bar(x=df.values, y=df.index, color=df.index, color_discrete_map=color_map, title=title)
+    fig.update_traces(width=0.8)
+    fig.update_layout(
         xaxis=dict(
-            title="Standard deviation (seconds)",
+            title=xlbl,
             tickformat=".2f", # Format as 2 decimal places
-            showgrid=True
+            showgrid=True,
+            range = xlim
         ),
         yaxis=dict(
-            title="Drivers",
-            tickfont=dict(size=14)
+            title=ylbl,
+            tickfont=dict(size=12)
         )
     )
-    consistency_fig.update_layout(legend_traceorder="reversed")
+    fig.update_layout(legend_traceorder="reversed")
 
-    return consistency_fig
+    return fig
+max_speeds = laps.groupby('Driver')['SpeedST'].max().sort_values(ascending=True)
+
 
 
 
 cols = st.columns(2)
 with cols[0]:
-    st.plotly_chart(consistency())
+    st.plotly_chart(plotly_barh(consistency, 
+                                'Driver Consistency', 
+                                'Standard Deviation (\u00B1 time(s))',
+                                  'Drivers', [0, consistency.max()+0.2],
+                                   color_map=driver_color_map))
+with cols[1]:
+    st.plotly_chart(plotly_barh(max_speeds, 
+                                'Maximum Speed on Main Straight', 
+                                'Speed (km/h)',
+                                  'Drivers', [max_speeds.min()-10, max_speeds.max()+10],
+                                   color_map=driver_color_map))
+
+
+fastest20 = session.laps.iloc[np.r_[session.laps.LapTime.nsmallest(20).index]][['Driver', 'LapTime', 'LapNumber', 'Stint', 'Compound', 'TyreLife']].reset_index(drop=True)
+fastest20['Team'] = fastest20.Driver.map(driver_team)
+fastest20 = fastest20[['Driver', 'Team', 'LapTime', 'LapNumber', 'Stint', 'Compound', 'TyreLife']]
+fastest20['LapTime'] = fastest20['LapTime'].apply(lambda x: str(x)[10:])
+fastest20['Compound'] = fastest20['Compound'].apply(lambda x: x[0])
+fastest20['Stint'] = fastest20['Stint'].apply(lambda x: int(x))
+
+def apply_team_colors(column):
+    # Map the team name to the hex code, default to empty string if not found
+        return [f'background-color: {team_colors.get(t, "")}' for t in column]
+
+cols = st.columns(2)
+with cols[0]:
+    st.dataframe(fastest20.style.apply(apply_team_colors, subset=['Team']))
+with cols[1]:
+    df = pd.DataFrame({'Value': [-10, 20, -5, 50]})
+    # Highlights the maximum value in each column
+    st.dataframe(df)
+
+
 

@@ -22,6 +22,17 @@ if 'default_year' not in st.session_state:
     st.session_state.default_year = years[-1] 
 
 
+if 'selected_year' not in st.session_state:
+    # Set the initial default value to the first option
+    st.session_state.default_year = datetime.datetime.now()
+
+if 'gp' not in st.session_state:
+    # Set the initial default value to the first option
+    st.session_state.gp = ''
+
+if 'event' not in st.session_state:
+    # Set the initial default value to the first option
+    st.session_state.event = 'Qualifying'
 # functions:
 
 
