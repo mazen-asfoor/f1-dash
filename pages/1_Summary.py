@@ -7,6 +7,18 @@ from utils import fix_laps
 
 fastf1.Cache.enable_cache('cache')
 
+st.markdown("""
+<style>
+    .main { background-color: #0e0e0e; }
+    .stApp { background-color: #0e0e0e; color: #f0f0f0; }
+    h1, h2, h3, h4 { color: #e10600; }
+    .stSelectbox label, .stMultiSelect label, .stSlider label { color: #cccccc !important; }
+    .block-container { padding-top: 1.5rem; }
+    .fastest-lap { background-color: #6a0dad22 !important; }
+    div[data-testid="stMetricValue"] { color: #e10600; font-size: 1.4rem; }
+</style>
+""", unsafe_allow_html=True)
+
 st.set_page_config(page_title="Summary", page_icon="📊", layout="wide")
 
 st.markdown("# Session Summary")
@@ -14,7 +26,7 @@ st.markdown("# Session Summary")
 
 
 
-session = fetch_f1_data(st.session_state.selected_year, st.session_state.gp, st.session_state.event[0])
+session = st.session_state.session
 
 laps_data = fix_laps(session)
 
