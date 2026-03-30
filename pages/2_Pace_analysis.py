@@ -39,6 +39,16 @@ def load_session(year: int, location: str, session_name: str):
     session.load(telemetry=True, weather=False, messages=False)
     return session
 
+TYRE_COLORS = {
+    "SOFT": "#e8002d",
+    "MEDIUM": "#ffd700",
+    "HARD": "#f0f0f0",
+    "INTERMEDIATE": "#39b54a",
+    "WET": "#0067ff",
+    "UNKNOWN": "#888888",
+    "TEST-UNKNOWN": "#888888",
+}
+
 # ── State init ─────────────────────────────────────────────────────────────────
 for key, default in [
     ("session", None),
@@ -96,12 +106,10 @@ if session is None:
     ### Select a year, Grand Prix and session type, then click **Load Session**.
     """)
     st.stop()
-# st.dataframe(session.results)
 
 
-# data setup:
-
-
+st.markdown(f"# 🏎️ {year} {location} — {session_name}")
+st.markdown("---")
 
 
 # Graphs
@@ -116,12 +124,12 @@ all_drivers = driver_teams.keys()
 
 teams = session.results[['Abbreviation', 'TeamName']].set_index('Abbreviation').to_dict()['TeamName']
 
-laps = session.laps.pick_accurate()[['Driver', 'Stint', 'Compound', 'DriverNumber', 'SpeedST', 'LapTime', 'TyreLife']]
+laps = session.laps[['Driver', 'Stint', 'Compound', 'DriverNumber', 'SpeedST', 'LapTime', 'TyreLife', 'IsAccurate']]
 
 laps['LapTime'] = laps['LapTime'].dt.total_seconds()
 laps['Team'] = laps.Driver.map(teams)
 
-average_pace = laps.groupby('Driver')['LapTime'].mean().sort_values()
+average_pace = laps.pick_accurate().pick_quicklaps().groupby('Driver')['LapTime'].mean().sort_values()
 
 team_colors = {}
 driver_team = {}
@@ -143,36 +151,53 @@ driver_color_map = dict(zip(laps['Driver'], laps['color']))
 
 
 
+
+COMPOUND_COLORS = {
+    'S': '#FF3333',  # Soft - Red
+    'M': '#FFD700',  # Medium - Yellow
+    'H': '#FFFFFF',  # Hard - White
+    'I': '#00CFFF',  # Inter - Green (from your palette)
+    'W': '#0057FF',  # Wet - Blue
+}
+
 def create_ticks(df=laps):
     ticks = []
+    df_clean = df.pick_accurate().pick_quicklaps()
 
     for d in df.Driver.unique():
-        avg = df[df.Driver == d]['LapTime'].mean()
-        bst_avg = average_pace.iloc[0]
-        diff =  f"+{avg-bst_avg:.2f}"
-    
-        avg = str(round(avg, 2))
-        # diff = f'+{str(round(diff, 2))}'
-        
         stnt = ''
-        compounds = df[df.Driver==d][['Stint', 'Compound']].value_counts().sort_index().index
+        compounds = df[df.Driver == d][['Stint', 'Compound']].value_counts().sort_index().index
+
         for c in range(len(compounds)):
-            stnt = stnt + compounds[c][1][0]+'-'
-            if len(stnt) <=3:
-                pass
-            elif (len(stnt) > 3) & (len(stnt.replace('-', '')) % 2 == 0):
-                stnt = stnt[:-2] + compounds[c][1][0]+'<br>'
-                
-        # print(stnt)
-        if stnt[-1] == '-':
+            letter = compounds[c][1][0]
+            color = COMPOUND_COLORS.get(letter, '#AAAAAA')
+            colored = f'<span style="color:{color}">{letter}</span>'
+            stnt = stnt + colored + '-'
+
+            raw_len = len(stnt.replace('-', '').replace(' ', ''))  # rough char count ignoring spans
+            actual_letters = sum(1 for ch in compounds[:c+1] for x in [ch[1][0]])  # count letters added
+
+            if actual_letters > 1 and actual_letters % 2 == 0:
+                stnt = stnt[:-1] + '<br>'  # replace trailing '-' with line break
+
+        if stnt.endswith('-'):
             stnt = stnt[:-1]
-        else:
+        elif stnt.endswith('<br>'):
             stnt = stnt[:-4]
+        
+        
+        avg = df_clean[df_clean.Driver == d]['LapTime'].mean()
+        bst_avg = average_pace.iloc[0]
+        diff = f"+{avg - bst_avg:.3f}"
+        avg = str(round(avg, 3))
+
+        
+
 
         b = '<br>'
-        tick = d+b+avg+b+diff+b+stnt
-
+        tick = d + b + avg + b + diff + b + stnt
         ticks.append(tick)
+
     return ticks
     
 
@@ -183,13 +208,13 @@ def pace_box(tcks = average_pace.index):
 
     # 2. Generate the plot
     fig = px.box(
-        laps, 
+        laps.pick_accurate().pick_quicklaps(), 
         x="Driver", 
         y="LapTime", 
         color="Driver",
         color_discrete_map=driver_color_map, 
         hover_data=laps.columns,
-        title='Pace distribution'
+        title='Pace distribution', points=False
     )
     fig.update_traces(boxmean=True)
     fig.update_xaxes(title_text = '',
@@ -201,12 +226,12 @@ def pace_box(tcks = average_pace.index):
 
     fig.update_layout(
     margin=dict(
-        l=10,  # Left margin
-        r=10,  # Right margin
+        l=20,  # Left margin
+        r=20,  # Right margin
         t=40,  # Top margin (leave a bit for the title if needed)
         b=10   # Bottom margin
     ),
-    autosize=True
+    # autosize=True
 )
 
     return fig
@@ -215,7 +240,7 @@ def pace_box(tcks = average_pace.index):
 st.plotly_chart(pace_box(tcks=create_ticks()))
 
 
-consistency = laps.groupby('Driver')['LapTime'].std().sort_values(ascending=False)
+consistency = laps.pick_accurate().pick_quicklaps().groupby('Driver')['LapTime'].std().sort_values(ascending=False)
 def plotly_barh(values, index, title, xlbl, ylbl, xlim, color_map):
     fig = px.bar(x=values, y=index, color=index, color_discrete_map=color_map, title=title)
     fig.update_traces(width=0.8)
@@ -269,6 +294,9 @@ fastest20 = fastest20[['Driver', 'Team', 'LapTime', 'LapNumber', 'Stint', 'Compo
 fastest20['LapTime'] = fastest20['LapTime'].apply(lambda x: str(x)[10:])
 fastest20['Compound'] = fastest20['Compound'].apply(lambda x: x[0])
 fastest20['Stint'] = fastest20['Stint'].apply(lambda x: int(x))
+fastest20['LapNumber'] = fastest20['LapNumber'].astype('int')
+fastest20['TyreLife'] = fastest20['TyreLife'].astype('int')
+
 
 def apply_team_colors(column):
     # Map the team name to the hex code, default to empty string if not found
@@ -279,17 +307,26 @@ with cols[0]:
     st.dataframe(fastest20.style.apply(apply_team_colors, subset=['Team']))
 with cols[1]:
     # drivers = session.results.groupby('TeamName')['Abbreviation'].first().values
-    df = session.laps.pick_drivers(bst_drivers)
-    best_teams = df[df['IsPersonalBest'] == True].groupby('Driver')['LapTime'].last().dt.total_seconds()
+    # st.write(ses_name)
+    if (ses_name == 'Race') or (ses_name == 'Sprint'):
+        best_teams = laps.pick_accurate().pick_quicklaps().groupby('Team')['LapTime'].mean().sort_values(ascending=True)
+        title = 'Average Differnce from Best Pace'
+        
+    else:
+        df = session.laps.pick_drivers(bst_drivers)
+        best_teams = df[df['IsPersonalBest'] == True].groupby('Driver')['LapTime'].last().dt.total_seconds()
+        title = 'Lap Time Differnce from Fastest Car'
 
-    best_teams = (((best_teams - best_teams.min())/best_teams.min())*100).sort_values(ascending=False)
+    best_teams = ((best_teams - best_teams.min())).sort_values(ascending=False)
+    # best_teams = best_teams.sort_values(asc)
     best_teams_idx =  best_teams.index
     best_teams_vals = best_teams.values
-    best_teams_idx = best_teams_idx.map(driver_teams)
+    if (ses_name != 'Race') and (ses_name != 'Sprint'):        
+        best_teams_idx = best_teams_idx.map(driver_teams)
 
     st.plotly_chart(plotly_barh(best_teams_vals, best_teams_idx, 
-                'Percentage differnce from fastest car',
-                'Percentage Difference (%)', 'Teams', [0, best_teams_vals.max()], 
+                title,
+                'Lap Time Difference (s/L)', 'Teams', [0, best_teams_vals.max()], 
                 color_map=team_colors))
     
 
