@@ -39,6 +39,20 @@ def load_session(year: int, location: str, session_name: str):
     session.load(telemetry=True, weather=False, messages=False)
     return session
 
+def outliers(series, inverse = False):
+    Q1 = series.quantile(0.25)
+    Q3 = series.quantile(0.75)
+    IQR = Q3-Q1
+
+    if inverse:
+        out = series[(series < (Q1 - 1.75 * IQR)) | (series > (Q3 + 1.75 * IQR))]
+        out = series.drop(out.index)
+    else:
+        out = series[(series < (Q1 - 1.75 * IQR)) | (series > (Q3 + 1.75 * IQR))]
+
+    return out
+
+
 TYRE_COLORS = {
     "SOFT": "#e8002d",
     "MEDIUM": "#ffd700",
@@ -119,6 +133,15 @@ bst_drivers = session.results.groupby('TeamName')['Abbreviation'].first().values
 driver_teams = session.results[['Abbreviation', 'TeamName']].set_index('Abbreviation').to_dict()['TeamName']
 all_drivers = driver_teams.keys()
 
+driver_color_map = {}
+driver_line_styles = {}
+for d in list(all_drivers):
+    style = fastplt.get_driver_style(d, ['color', 'linestyle'], session=session)
+    if style['linestyle'] == 'dashed':
+        style['linestyle'] = 'dash'
+    driver_line_styles[d]= style['linestyle']
+    driver_color_map[d] = style['color']
+
 
 
 
@@ -147,7 +170,7 @@ for driv in average_pace.index.to_list():
     keys[driv] = average_pace.index.to_list().index(driv)
 laps = laps.sort_values(by='Driver', key=lambda x: x.map(keys)).reset_index(drop=True)
 
-driver_color_map = dict(zip(laps['Driver'], laps['color']))
+# driver_color_map = dict(zip(laps['Driver'], laps['color']))
 
 
 
@@ -330,5 +353,67 @@ with cols[1]:
                 color_map=team_colors))
     
 
+lap_ends = session.laps
+lap_ends['LapEndTime'] = lap_ends['LapStartTime'] + lap_ends['LapTime']
+lap_ends['LapEndTime'] = lap_ends['LapEndTime'].dt.total_seconds()
+lap_ends = lap_ends.groupby(['Driver', 'LapNumber'])['LapEndTime'].first().unstack()
+
+idx_finish = session.results[session.results.Time.isnull() == False].Abbreviation.values
+
+lap_ends.loc[idx_finish, :] = lap_ends.loc[idx_finish, :].interpolate('linear', axis=1)
+lap_diff = (lap_ends.min() - lap_ends).T
+lap_diff.reset_index(drop=True, inplace=True)
+lap_diff.index = lap_diff.index+1
+
+fig = px.line(
+    lap_diff, 
+    x=lap_diff.index, 
+    y=lap_diff.columns,
+    color_discrete_map=driver_color_map
+)
+
+# Optional: Update axis labels if the index name is missing
+fig.update_layout(xaxis_title="Lap Number", yaxis_title="Time Difference from leader",  hovermode="x unified")
+                #   hovertemplate="<b>%{data.name} %{y}<extra></extra>")
+fig.update_traces(hovertemplate="<b>%{data.name} Gap to leader: %{y}<extra></extra>")
+
+
+driver_cols = list(lap_diff.columns) 
+
+# If you are filtering columns in a loop or list comprehension:
+desired_order = list(session.results.Abbreviation.values)
+ordered_cols = [c for c in lap_diff.columns if c in desired_order]
+
+# 3. Apply ordering and visibility logic
+for trace in fig.data:
+    if trace.name in driver_line_styles:
+        trace.update(line=dict(dash=driver_line_styles[trace.name]))
+
+    if trace.name in desired_order:
+        # Set the rank based on the index in your list
+        trace.legendrank = desired_order.index(trace.name)
+    else:
+        # Drivers not in your list go to the end
+        trace.legendrank = 1000 
+    
+    # Hide all traces except the first one in your desired order
+    if trace.name != desired_order[0]:
+        trace.visible = 'legendonly'
+
+# fig.update_layout(
+#     template="plotly_dark",
+#     legend=dict(bgcolor="#1a1a1a", bordercolor="#333"),
+#     margin=dict(l=60, r=20, t=30, b=40),
+#     hovermode="x",
+#     hoverlabel=dict(
+#         bgcolor="#1a1a1a",
+#         bordercolor="#444",
+#         font=dict(color="#f0f0f0", size=12),
+#         namelength=-1,
+#     ),
+# )
+
+
+st.plotly_chart(fig)
 
 

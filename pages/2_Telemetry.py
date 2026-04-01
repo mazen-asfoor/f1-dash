@@ -301,9 +301,9 @@ def compute_tyre_deg(laps_df: pd.DataFrame, fuel_correct: bool,
         median = np.median(trimmed["LapTimeSeconds"])
         std    = np.std(trimmed["LapTimeSeconds"])
         if std > 0:
-            trimmed = trimmed[np.abs(trimmed["LapTimeSeconds"] - median) <= 2 * std]
+            trimmed = trimmed[np.abs(trimmed["LapTimeSeconds"] - median) <= 1.5 * std]
 
-        if len(trimmed) < 3:
+        if len(trimmed) < 3:   #I believe here lies and inaccuracy??
             continue
 
         x = trimmed["TyreLife"].values.astype(float)
@@ -496,44 +496,68 @@ def render_lap_chart(selected_drivers, year, location, session_name):
         disp_laps = disp_laps.dropna(subset=["LapTimeSeconds"])
 
         if fuel_correct:
-            disp_laps = disp_laps.copy()
             fuel_remaining = STARTING_FUEL_KG - (FUEL_PER_LAP_KG * (disp_laps["LapNumber"] - 1))
-            correction     = fuel_remaining * FUEL_EFFECT_S_PER_KG
-            disp_laps["LapTimeSeconds"] = disp_laps["LapTimeSeconds"] - correction
+            disp_laps["LapTimeSeconds"] = disp_laps["LapTimeSeconds"] - fuel_remaining * FUEL_EFFECT_S_PER_KG
             disp_laps["LapTimeStr"]     = disp_laps["LapTimeSeconds"].apply(seconds_to_laptime)
 
         drv_color = get_driver_color_for_selection(drv, selected_drivers, _session=session)
+        drv_dash  = get_driver_line_style(drv, _session=session)
 
-        # One trace per tyre compound so markers get correct colours
-        for compound, grp in disp_laps.groupby("Compound"):
+        # Add an invisible master trace for the driver so the whole driver
+        # can be toggled on/off from the legend independently of stints
+        fig_laps.add_trace(go.Scatter(
+            x=[None], y=[None],
+            mode="lines",
+            name=drv,
+            line=dict(color=drv_color, width=2, dash=drv_dash),
+            legendgroup=drv,
+            legendgrouptitle=dict(text=drv, font=dict(color=drv_color, size=13)),
+            showlegend=True,
+        ))
+
+        # One trace per STINT so same-compound stints are separate
+        for stint, stint_grp in disp_laps.groupby("Stint"):
+            stint_grp  = stint_grp.sort_values("LapNumber")
+            compound   = stint_grp["Compound"].iloc[0]
             tyre_color = TYRE_COLORS.get(compound, "#aaaaaa")
+            stint_name = f"{drv} — S{int(stint)} ({compound})"
+
             hover = [
-                f"Driver: {drv}<br>Lap: {r.LapNumber}<br>Time: {r.LapTimeStr}<br>Tyre: {compound}"
-                for _, r in grp.iterrows()
+                f"Driver: {drv}<br>Lap: {r.LapNumber}<br>Time: {r.LapTimeStr}"
+                f"<br>Tyre: {compound}<br>Stint: {int(stint)}<br>Tyre age: {int(r.TyreLife)} laps"
+                for _, r in stint_grp.iterrows()
             ]
+
             fig_laps.add_trace(go.Scatter(
-                x=grp["LapNumber"],
-                y=grp["LapTimeSeconds"],
+                x=stint_grp["LapNumber"],
+                y=stint_grp["LapTimeSeconds"],
                 mode="lines+markers",
-                name=f"{drv} — {compound}",
-                line=dict(color=drv_color, width=2, dash=get_driver_line_style(drv, _session=session)),
+                name=stint_name,
+                line=dict(color=drv_color, width=2, dash=drv_dash),
                 marker=dict(color=tyre_color, size=9, line=dict(color=drv_color, width=1.5)),
                 hovertext=hover,
                 hoverinfo="text",
                 legendgroup=drv,
-                customdata=list(zip([drv] * len(grp), grp["LapNumber"])),
+                legendgrouptitle=dict(text=drv, font=dict(color=drv_color, size=13)),
+                showlegend=True,
+                customdata=list(zip([drv] * len(stint_grp), stint_grp["LapNumber"])),
             ))
 
     fig_laps.update_layout(
-        template="plotly_dark",
-        xaxis_title="Lap Number",
-        yaxis_title="Lap Time (s)",
-        yaxis=dict(tickformat=".3f"),
-        hovermode="closest",
-        legend=dict(bgcolor="#1a1a1a", bordercolor="#333"),
-        height=480,
-        margin=dict(l=60, r=20, t=30, b=50),
-    )
+    template="plotly_dark",
+    xaxis_title="Lap Number",
+    yaxis_title="Lap Time (s)",
+    yaxis=dict(tickformat=".3f"),
+    hovermode="closest",
+    legend=dict(
+        bgcolor="#1a1a1a",
+        bordercolor="#333",
+        groupclick="toggleitem",   # click item = toggle just that stint
+                                   # double click = toggle whole driver group
+    ),
+    height=480,
+    margin=dict(l=60, r=20, t=30, b=50),
+)
 
     st.plotly_chart(fig_laps, width='stretch', key="lap_time_chart")
 
