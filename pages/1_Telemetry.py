@@ -29,6 +29,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+st.logo('C://Users//moki2//Mazen Work//F1 dashboard//f1fmlogo.png', size="large")
+
 # ── Styling ────────────────────────────────────────────────────────────────────
 # st.markdown("""
 # <style>
@@ -267,55 +269,7 @@ def compute_delta_to_ref(year, location, session_name, ref_drv, ref_lap, other_d
     return ref_dist, delta
 
 
-def compute_tyre_deg(laps_df: pd.DataFrame, fuel_correct: bool,
-                     starting_fuel: float, fuel_per_lap: float,
-                     fuel_effect: float) -> dict:
-    """
-    Returns {stint_number: {"slope": s, "intercept": i, "compound": c, "laps": df}}
-    slope is in seconds per lap of tyre age.
-    """
-    results = {}
-    df = laps_df.copy()
 
-    if fuel_correct:
-        fuel_remaining = starting_fuel - (fuel_per_lap * (df["LapNumber"] - 1))
-        df["LapTimeSeconds"] = df["LapTimeSeconds"] - fuel_remaining * fuel_effect
-
-    df = df.dropna(subset=["LapTimeSeconds"])
-    df = df[~df["PitInTime"].notna() & ~df["PitOutTime"].notna()]
-
-    for stint, grp in df.groupby("Stint"):
-        grp = grp.sort_values("TyreLife")
-
-        # Remove outlap (first lap of stint) and inlap (last lap before stop)
-        # Only trim if enough laps remain for a meaningful fit
-        trimmed = grp.iloc[1:]   # drop outlap
-        if len(trimmed) > 3:
-            trimmed = trimmed.iloc[:-1]  # drop inlap only if we still have 3+
-
-        if len(trimmed) < 3:
-            trimmed = grp  # fall back to full stint if too short
-
-        # Also remove laps more than 2 std deviations from the median
-        # to handle SC laps, red flags, or anomalous slow laps mid-stint
-        median = np.median(trimmed["LapTimeSeconds"])
-        std    = np.std(trimmed["LapTimeSeconds"])
-        if std > 0:
-            trimmed = trimmed[np.abs(trimmed["LapTimeSeconds"] - median) <= 1.5 * std]
-
-        if len(trimmed) < 3:   #I believe here lies and inaccuracy??
-            continue
-
-        x = trimmed["TyreLife"].values.astype(float)
-        y = trimmed["LapTimeSeconds"].values.astype(float)
-        coeffs = np.polyfit(x, y, 1)  # coeffs[0] = slope, coeffs[1] = intercept
-        results[int(stint)] = {
-            "slope":     round(coeffs[0], 4),
-            "intercept": round(coeffs[1], 4),
-            "compound":  grp["Compound"].iloc[0],
-            "laps":      grp,
-        }
-    return results
 
 def seconds_to_laptime(s: float) -> str:
     if np.isnan(s):
@@ -367,6 +321,7 @@ for key, default in [
 session = st.session_state.session
 
 st.sidebar.markdown("## 🏎️ Session Selector")
+st.sidebar.write('Notice: Please press load session, even if the session appears to have loaded.')
 
 current_year = datetime.datetime.now().year
 years = list(range(2018, current_year + 1))[::-1]
@@ -404,17 +359,39 @@ if load_btn:
 session = st.session_state.session
 
 if session is None:
-    st.markdown("""
-    # 🏎️ F1 Telemetry Dashboard
-    ### Select a year, Grand Prix and session type, then click **Load Session**.
-    """)
+    col1, col2 = st.columns([6,1], gap="xxsmall") 
+
+    with col1:
+        # Display the image in the first column
+         st.markdown("""
+        # 🏎️ F1 Session Dashboard: <br>Presented by F1FM Analytics
+         All the graphs you need to analyse F1 races and sessions all for free!
+        Become your own pitwall now!
+        ### Select a year, Grand Prix and session type, then click **Load Session**.
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.image('C://Users//moki2//Mazen Work//F1 dashboard//f1fmlogo.png', width=200)
+
+
     st.stop()
+
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HEADER
 # ══════════════════════════════════════════════════════════════════════════════
 if load_btn:
     st.markdown(f"# 🏎️ {year} {location} — {session_name}")
+
+col1, col2 = st.columns([6,1], gap="xxsmall") 
+with col1:
+    st.markdown(f"# 🏎️ {year} {location} — {session_name} Telemetry")
+
+with col2:
+    st.image('C://Users//moki2//Mazen Work//F1 dashboard//f1fmlogo.png', width=200)
+
+
 st.markdown("---")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -464,6 +441,94 @@ if "outlier_toggle_chart" in st.session_state:
 
 st.markdown("---")
 
+
+
+def detect_warmup_end(times: np.ndarray) -> int:
+    """
+    Dynamically detect where the tyre warm-up phase ends.
+    Strategy: find the first lap where the time stops improving
+    (i.e. first local minimum in a smoothed version of the stint).
+    Returns the index to START the regression from.
+    """
+    if len(times) <= 4:
+        return 0
+    # Smooth with a rolling min to find the settling point
+    smoothed = np.array([min(times[max(0,i-1):i+2]) for i in range(len(times))])
+    diffs = np.diff(smoothed)
+    # Find first index where times stop decreasing (warm-up over)
+    for i, d in enumerate(diffs):
+        if d >= 0:
+            return max(0, i)  # start from this lap
+    return min(3, len(times) - 3)  # fallback: skip first 3
+
+
+def compute_tyre_deg(laps_df: pd.DataFrame, fuel_correct: bool) -> dict:
+    """
+    Returns {stint_number: {slope, intercept, compound, fit_laps, all_laps}}
+    slope is seconds per lap of tyre age (fuel-corrected if requested).
+    Warm-up laps are detected dynamically and excluded from the fit.
+    """
+    results = {}
+    df = laps_df.copy()
+
+    if fuel_correct:
+        fuel_remaining      = STARTING_FUEL_KG - (FUEL_PER_LAP_KG * (df["LapNumber"] - 1))
+        df["LapTimeSeconds"] = df["LapTimeSeconds"] - fuel_remaining * FUEL_EFFECT_S_PER_KG
+
+    # Remove pit laps and obvious outliers
+    df = df[~df["PitInTime"].notna() & ~df["PitOutTime"].notna()]
+    df = df.dropna(subset=["LapTimeSeconds"])
+
+    # Remove laps more than 7% above session median — catches SC/VSC/red flag laps
+    session_median = df["LapTimeSeconds"].median()
+    if not np.isnan(session_median):
+        df = df[df["LapTimeSeconds"] <= session_median * 1.07]
+
+    for stint, grp in df.groupby("Stint"):
+        grp = grp.sort_values("LapNumber").reset_index(drop=True)
+        if len(grp) < 4:
+            continue
+
+        # ── Dynamic warm-up detection ──────────────────────────────────────
+        times    = grp["LapTimeSeconds"].values
+        start_i  = detect_warmup_end(times)
+
+        # Also drop the final lap of the stint (inlap — usually slow or push)
+        end_i = len(grp) - 1 if len(grp) - 1 - start_i >= 3 else len(grp)
+        trimmed = grp.iloc[start_i:end_i].copy()
+
+        # ── Remove statistical outliers (SC laps, red flags etc) ──────────
+        # Use IQR-based filter — more robust than std for skewed lap time distributions
+        if len(trimmed) >= 4:
+            q1  = np.percentile(trimmed["LapTimeSeconds"], 25)
+            q3  = np.percentile(trimmed["LapTimeSeconds"], 75)
+            iqr = q3 - q1
+            # Keep laps within 1.5 IQR of the median (standard Tukey fence)
+            trimmed = trimmed[
+                (trimmed["LapTimeSeconds"] >= q1 - 1.5 * iqr) &
+                (trimmed["LapTimeSeconds"] <= q3 + 1.5 * iqr)
+            ]
+
+        if len(trimmed) < 3:
+            trimmed = grp.iloc[1:]  # fallback: just drop outlap
+
+        if len(trimmed) < 3:
+            continue
+
+        x      = trimmed["LapNumber"].values.astype(float)
+        y      = trimmed["LapTimeSeconds"].values.astype(float)
+        coeffs = np.polyfit(x, y, 1)
+
+        results[int(stint)] = {
+            "slope":     round(float(coeffs[0]), 4),
+            "intercept": round(float(coeffs[1]), 4),
+            "compound":  grp["Compound"].iloc[0],
+            "fit_laps":  trimmed,
+            "all_laps":  grp,
+        }
+    return results
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # LAP TIME LINE CHART
 # ══════════════════════════════════════════════════════════════════════════════
@@ -475,121 +540,245 @@ def render_lap_chart(selected_drivers, year, location, session_name):
     with st.container():
         st.markdown("## 📈 Lap Times")
 
-        toggle = st.toggle(
-            "🚫 Remove outlier laps (pit stops / slow laps)",
-            value=st.session_state.remove_outliers,
-            key="outlier_toggle_chart",
-        )
-        fuel_correct = st.toggle(
-            "⛽ Fuel corrected lap times (race only)",
-            value=False,
-            key="fuel_correction_toggle",
-        )
+        ctrl1, ctrl2, ctrl3 = st.columns(3)
+        with ctrl1:
+            toggle = st.toggle(
+                "🚫 Remove outlier laps",
+                value=st.session_state.remove_outliers,
+                key="outlier_toggle_chart",
+            )
+        with ctrl2:
+            fuel_correct = st.toggle(
+                "⛽ Fuel corrected",
+                value=False,
+                key="fuel_correction_toggle",
+            )
+        with ctrl3:
+            show_best_fit = st.toggle(
+                "📐 Show best fit lines",
+                value=False,
+                key="show_best_fit_toggle",
+            )
 
-        
+        # ── Driver visibility selector ─────────────────────────────────
+        visible_drivers = st.multiselect(
+            "👁 Visible drivers",
+            options=selected_drivers,
+            default=selected_drivers,
+            key="lap_chart_visible_drivers",
+        )
 
         fig_laps = go.Figure()
 
-    for drv in selected_drivers:
-        raw_laps = st.session_state.laps_data[drv].copy()
-        disp_laps = filter_outliers(raw_laps) if toggle else raw_laps
-        disp_laps = disp_laps.dropna(subset=["LapTimeSeconds"])
+        for drv in selected_drivers:
+            raw_laps  = st.session_state.laps_data[drv].copy()
+            disp_laps = filter_outliers(raw_laps) if toggle else raw_laps
+            disp_laps = disp_laps.dropna(subset=["LapTimeSeconds"])
 
+            is_visible = drv in visible_drivers
+
+            if fuel_correct:
+                fuel_remaining              = STARTING_FUEL_KG - (FUEL_PER_LAP_KG * (disp_laps["LapNumber"] - 1))
+                disp_laps                   = disp_laps.copy()
+                disp_laps["LapTimeSeconds"] = disp_laps["LapTimeSeconds"] - fuel_remaining * FUEL_EFFECT_S_PER_KG
+                disp_laps["LapTimeStr"]     = disp_laps["LapTimeSeconds"].apply(seconds_to_laptime)
+
+            drv_color = get_driver_color(drv, selected_drivers)
+            drv_dash  = get_driver_line_style(drv, _session=session)
+
+            for stint, stint_grp in disp_laps.groupby("Stint"):
+                stint_grp  = stint_grp.sort_values("LapNumber")
+                compound   = stint_grp["Compound"].iloc[0]
+                tyre_color = TYRE_COLORS.get(compound, "#aaaaaa")
+                stint_name = f"{drv} — S{int(stint)} ({compound})"
+                hover = [
+                    f"Driver: {drv}<br>Lap: {r.LapNumber}<br>Time: {r.LapTimeStr}"
+                    f"<br>Tyre: {compound}<br>Stint: {int(stint)}<br>Age: {int(r.TyreLife)} laps"
+                    for _, r in stint_grp.iterrows()
+                ]
+                fig_laps.add_trace(go.Scatter(
+                    x=stint_grp["LapNumber"],
+                    y=stint_grp["LapTimeSeconds"],
+                    mode="lines+markers",
+                    name=stint_name,
+                    line=dict(color=drv_color, width=2, dash=drv_dash),
+                    marker=dict(color=tyre_color, size=9, line=dict(color=drv_color, width=1.5)),
+                    hovertext=hover,
+                    hoverinfo="text",
+                    legendgroup=drv,
+                    legendgrouptitle=dict(text=drv, font=dict(color=drv_color, size=13)),
+                    showlegend=True,
+                    visible=True if is_visible else "legendonly",
+                    customdata=list(zip([drv] * len(stint_grp), stint_grp["LapNumber"])),
+                ))
+
+            if show_best_fit:
+                deg_data = compute_tyre_deg(raw_laps, fuel_correct=fuel_correct)
+                for stint, d in deg_data.items():
+                    fit_laps = d["fit_laps"]
+                    if fit_laps.empty:
+                        continue
+                    x_fit = np.array([fit_laps["LapNumber"].min(), fit_laps["LapNumber"].max()], dtype=float)
+                    y_fit = d["slope"] * x_fit + d["intercept"]
+                    fig_laps.add_trace(go.Scatter(
+                        x=x_fit, y=y_fit,
+                        mode="lines",
+                        name=f"{drv} S{stint} fit ({d['slope']:+.3f}s/lap)",
+                        line=dict(color=drv_color, width=1.5, dash="longdash"),
+                        legendgroup=drv,
+                        legendgrouptitle=dict(text=drv, font=dict(color=drv_color, size=13)),
+                        showlegend=True,
+                        visible=True if is_visible else "legendonly",
+                        hovertemplate=f"<b>{drv} S{stint} best fit</b><br>Deg: {d['slope']:+.3f}s/lap<extra></extra>",
+                    ))
+
+        title_suffix = " *(fuel corrected)*" if fuel_correct else ""
+        fig_laps.update_layout(
+            template="plotly_dark",
+            xaxis_title="Lap Number",
+            yaxis_title=f"Lap Time (s){' — fuel corrected' if fuel_correct else ''}",
+            yaxis=dict(tickformat=".3f"),
+            hovermode="closest",
+            legend=dict(
+                bgcolor="#1a1a1a",
+                bordercolor="#333",
+                groupclick="toggleitem",  # individual stint clicks work normally
+            ),
+            height=500,
+            margin=dict(l=60, r=20, t=40, b=50),
+            title=dict(
+                text=f"📈 Lap Times{title_suffix}",
+                font=dict(color="#ffffff", size=16),
+            ),
+        )
+        st.plotly_chart(fig_laps, use_container_width=True, key="lap_time_chart")
+
+        # ── Tyre degradation section ───────────────────────────────────────
         if fuel_correct:
-            fuel_remaining = STARTING_FUEL_KG - (FUEL_PER_LAP_KG * (disp_laps["LapNumber"] - 1))
-            disp_laps["LapTimeSeconds"] = disp_laps["LapTimeSeconds"] - fuel_remaining * FUEL_EFFECT_S_PER_KG
-            disp_laps["LapTimeStr"]     = disp_laps["LapTimeSeconds"].apply(seconds_to_laptime)
+            st.markdown("#### 📉 Tyre Degradation Rate *(fuel corrected)*")
 
-        drv_color = get_driver_color_for_selection(drv, selected_drivers, _session=session)
-        drv_dash  = get_driver_line_style(drv, _session=session)
+            # Collect all deg data for bar chart
+            bar_labels  = []
+            bar_values  = []
+            bar_colors  = []
+            bar_drivers = []
 
-        # Add an invisible master trace for the driver so the whole driver
-        # can be toggled on/off from the legend independently of stints
-        fig_laps.add_trace(go.Scatter(
-            x=[None], y=[None],
-            mode="lines",
-            name=drv,
-            line=dict(color=drv_color, width=2, dash=drv_dash),
-            legendgroup=drv,
-            legendgrouptitle=dict(text=drv, font=dict(color=drv_color, size=13)),
-            showlegend=True,
-        ))
-
-        # One trace per STINT so same-compound stints are separate
-        for stint, stint_grp in disp_laps.groupby("Stint"):
-            stint_grp  = stint_grp.sort_values("LapNumber")
-            compound   = stint_grp["Compound"].iloc[0]
-            tyre_color = TYRE_COLORS.get(compound, "#aaaaaa")
-            stint_name = f"{drv} — S{int(stint)} ({compound})"
-
-            hover = [
-                f"Driver: {drv}<br>Lap: {r.LapNumber}<br>Time: {r.LapTimeStr}"
-                f"<br>Tyre: {compound}<br>Stint: {int(stint)}<br>Tyre age: {int(r.TyreLife)} laps"
-                for _, r in stint_grp.iterrows()
-            ]
-
-            fig_laps.add_trace(go.Scatter(
-                x=stint_grp["LapNumber"],
-                y=stint_grp["LapTimeSeconds"],
-                mode="lines+markers",
-                name=stint_name,
-                line=dict(color=drv_color, width=2, dash=drv_dash),
-                marker=dict(color=tyre_color, size=9, line=dict(color=drv_color, width=1.5)),
-                hovertext=hover,
-                hoverinfo="text",
-                legendgroup=drv,
-                legendgrouptitle=dict(text=drv, font=dict(color=drv_color, size=13)),
-                showlegend=True,
-                customdata=list(zip([drv] * len(stint_grp), stint_grp["LapNumber"])),
-            ))
-
-    fig_laps.update_layout(
-    template="plotly_dark",
-    xaxis_title="Lap Number",
-    yaxis_title="Lap Time (s)",
-    yaxis=dict(tickformat=".3f"),
-    hovermode="closest",
-    legend=dict(
-        bgcolor="#1a1a1a",
-        bordercolor="#333",
-        groupclick="toggleitem",   # click item = toggle just that stint
-                                   # double click = toggle whole driver group
-    ),
-    height=480,
-    margin=dict(l=60, r=20, t=30, b=50),
-)
-
-    st.plotly_chart(fig_laps, width='stretch', key="lap_time_chart")
-
-    if fuel_correct:
-            st.markdown("#### 📉 Tyre Degradation (fuel corrected)")
             deg_cols = st.columns(len(selected_drivers))
             for i, drv in enumerate(selected_drivers):
-                raw = st.session_state.laps_data[drv].copy()
+                raw       = st.session_state.laps_data[drv].copy()
                 if toggle:
                     raw = filter_outliers(raw)
-                deg = compute_tyre_deg(
-                    raw, fuel_correct=True,
-                    starting_fuel=STARTING_FUEL_KG,
-                    fuel_per_lap=FUEL_PER_LAP_KG,
-                    fuel_effect=FUEL_EFFECT_S_PER_KG,
-                )
+                deg       = compute_tyre_deg(raw, fuel_correct=True)
+                drv_color = get_driver_color(drv, selected_drivers, _session=session)
+
                 with deg_cols[i]:
-                    drv_color = get_driver_color_for_selection(drv, selected_drivers, _session=session)
-                    st.markdown(f"<span style='color:{drv_color};font-weight:bold;'>{drv}</span>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"<span style='color:{drv_color};font-weight:bold;font-size:14px;'>{drv}</span>",
+                        unsafe_allow_html=True,
+                    )
                     for stint, data in deg.items():
                         tyre_color = TYRE_COLORS.get(data["compound"], "#aaaaaa")
-                        direction  = "↑ deg" if data["slope"] > 0 else "↓ improvement"
+                        direction  = "↑ degrading" if data["slope"] > 0 else "↓ improving"
+                        n_laps     = len(data["fit_laps"])
                         st.markdown(
                             f"<div style='background:#1a1a1a;border-left:3px solid {tyre_color};"
                             f"padding:6px 10px;margin:4px 0;border-radius:4px;font-size:12px;'>"
-                            f"<b>Stint {stint}</b> — {data['compound']}<br>"
+                            f"<b>Stint {stint}</b> — {data['compound']} "
+                            f"<span style='color:#555;font-size:10px;'>({n_laps} laps used)</span><br>"
                             f"<span style='color:{tyre_color};font-size:16px;font-weight:bold;'>"
                             f"{abs(data['slope']):.3f}s/lap</span> "
                             f"<span style='color:#888;'>{direction}</span>"
                             f"</div>",
                             unsafe_allow_html=True,
                         )
+                        # Collect for bar chart
+                        bar_labels.append(f"{drv} S{stint}<br>{data['compound']}")
+                        bar_values.append(data["slope"])
+                        bar_colors.append(tyre_color)
+                        bar_drivers.append(drv)
+
+            # ── Degradation bar chart ──────────────────────────────────────
+            # ── Degradation bar chart ──────────────────────────────────────────────
+            if bar_labels:
+                st.markdown("#### 📊 Degradation Comparison")
+                fig_bar = go.Figure()
+
+                # Find all unique stint numbers across all drivers
+                all_stints = sorted(set(
+                    stint
+                    for drv in selected_drivers
+                    for stint in compute_tyre_deg(
+                        filter_outliers(st.session_state.laps_data[drv].copy()) if toggle
+                        else st.session_state.laps_data[drv].copy(),
+                        fuel_correct=True
+                    ).keys()
+                ))
+
+                for stint_num in all_stints:
+                    x_labels = []
+                    y_values = []
+                    bar_colors = []
+
+                    for drv in selected_drivers:
+                        raw = st.session_state.laps_data[drv].copy()
+                        if toggle:
+                            raw = filter_outliers(raw)
+                        deg = compute_tyre_deg(raw, fuel_correct=True)
+
+                        if stint_num not in deg:
+                            continue  # driver doesn't have this stint — skip, no phantom bar
+
+                        data = deg[stint_num]
+                        x_labels.append(drv)
+                        y_values.append(data["slope"])
+                        bar_colors.append(TYRE_COLORS.get(data["compound"], "#aaaaaa"))
+
+                    if not x_labels:
+                        continue
+
+                    fig_bar.add_trace(go.Bar(
+                        name=f"Stint {stint_num}",
+                        x=x_labels,
+                        y=y_values,
+                        marker=dict(
+                            color=bar_colors,
+                            line=dict(color="#333", width=1),
+                        ),
+                        text=[f"{v:+.3f}s/lap" for v in y_values],
+                        textposition="outside",
+                        textfont=dict(color="#aaaaaa", size=11),
+                        hovertemplate="<b>%{x} — Stint " + str(stint_num) + "</b><br>Deg rate: %{y:+.3f}s/lap<extra></extra>",
+                        legendgroup=f"stint_{stint_num}",
+                    ))
+
+                fig_bar.add_hline(
+                    y=0,
+                    line=dict(color="#555", width=1, dash="dash"),
+                )
+                fig_bar.update_layout(
+                    template="plotly_dark",
+                    height=320,
+                    barmode="group",
+                    margin=dict(l=40, r=20, t=20, b=60),
+                    yaxis=dict(
+                        title="Deg rate (s/lap)",
+                        gridcolor="#2a2a2a",
+                        zeroline=True,
+                        zerolinewidth=1.5,
+                    ),
+                    xaxis=dict(
+                        gridcolor="#2a2a2a",
+                        title="Driver",
+                    ),
+                    legend=dict(
+                        bgcolor="#1a1a1a",
+                        bordercolor="#333",
+                        title=dict(text="Stint", font=dict(color="#aaaaaa", size=11)),
+                    ),
+                    showlegend=True,
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
+
 
 render_lap_chart(selected_drivers, year, location, session_name)
 
@@ -645,13 +834,13 @@ if st.session_state.laps_data:
         st.rerun()
 
     # ── Instructions ──────────────────────────────────────────────────────
-    selected_count = len(st.session_state.selected_lap_list)
-    remaining = 5 - selected_count
-    st.caption(
-        f"{'✅' if selected_count else '⬜'} {selected_count}/5 laps selected — "
-        f"click any cell to {'add' if remaining else '(max reached, deselect first)'} a lap. "
-        f"Click a selected lap to deselect it."
-    )
+    # selected_count = len(st.session_state.selected_lap_list)
+    # remaining = 5 - selected_count
+    # st.caption(
+    #     f"{'✅' if selected_count else '⬜'} {selected_count}/5 laps selected — "
+    #     f"click any cell to {'add' if remaining else '(max reached, deselect first)'} a lap. "
+    #     f"Click a selected lap to deselect it."
+    # )
 
     # ── Build interactive table ────────────────────────────────────────────
     col_headers = "".join(
@@ -956,10 +1145,10 @@ if len(tel_data) >= 2:
     with cols[0]:
         # st.markdown("<br><br><br><br>", unsafe_allow_html=True)
         st.header('Track Domination')
+        st.subheader('Where each driver edges out the others speed-wise on track')
         st.plotly_chart(fig_map, width="stretch")
 else:
     st.header('Driver Speed Map')
-    st.subheader('Where each driver edges out the others speed-wise on track')
     st.plotly_chart(fig_map, width="stretch")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1340,25 +1529,26 @@ try:
 except Exception:
     pass  # silently skip if circuit info unavailable
 
-st.session_state.tel_fig_cache = fig_tel
-st.session_state.tel_fig_key   = tel_fig_key
+# st.session_state.tel_fig_cache = fig_tel
+# st.session_state.tel_fig_key   = tel_fig_key
 
-st.plotly_chart(fig_tel, width="stretch", config={"displayModeBar": True})
+st.plotly_chart(fig_tel, config={"displayModeBar": True})
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FOOTER
 # ══════════════════════════════════════════════════════════════════════════════
-# st.markdown("---")
-# st.markdown(
-#     "<center style='color:#aaaaaa;font-size:0.85rem;'>Data provided by <b>FastF1</b> · Built with Streamlit & Plotly</center>",
-#     unsafe_allow_html=True,
-# )
+st.markdown("---")
 
-# st.markdown(
-#     "<center style='color:#555;font-size:0.8rem;'>" \
-#     "This is an unofficial, non-commercial project and "
-#     "is not affiliated with the FIA or Formula 1. All F1-related trademarks"
-#     " and copyrights belong to their respective owners."
-#     "</center>",
-#     unsafe_allow_html=True,
-# )
+st.markdown(
+    "<center style='color:#aaaaaa;font-size:0.85rem;'>Data provided by <b>FastF1</b> · Built with Streamlit & Plotly</center>",
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    "<center style='color:#555;font-size:0.8rem;'>" \
+    "This is an unofficial, non-commercial project and "
+    "is not affiliated with the FIA or Formula 1. All F1-related trademarks"
+    " and copyrights belong to their respective owners."
+    "</center>",
+    unsafe_allow_html=True,
+)

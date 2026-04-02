@@ -25,6 +25,9 @@ fastf1.Cache.enable_cache('cache')
 
 st.set_page_config(page_title="Pace Analysis", page_icon="📈", layout="wide")
 
+st.logo('C://Users//moki2//Mazen Work//F1 dashboard//f1fmlogo.png', size="large")
+
+
 # st.markdown("# Pace Analysis")
 # st.sidebar.header("Plotting Demo")
 
@@ -79,6 +82,8 @@ for key, default in [
 
 
 st.sidebar.markdown("## 🏎️ Session Selector")
+st.sidebar.write('Notice: Please press load session, even if the session appears to have loaded.')
+
 
 current_year = datetime.datetime.now().year
 years = list(range(2018, current_year + 1))[::-1]
@@ -115,14 +120,31 @@ if load_btn:
 session = st.session_state.session
 
 if session is None:
-    st.markdown("""
-    # 🏎️ F1 Telemetry Dashboard
-    ### Select a year, Grand Prix and session type, then click **Load Session**.
-    """)
+    col1, col2 = st.columns([6,1], gap="xxsmall") 
+
+    with col1:
+        # Display the image in the first column
+         st.markdown("""
+        # 🏎️ F1 Session Dashboard: <br>Presented by F1FM Analytics
+         All the graphs you need to analyse F1 races and sessions all for free!
+        Become your own pitwall now!
+        ### Select a year, Grand Prix and session type, then click **Load Session**.
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.image('C://Users//moki2//Mazen Work//F1 dashboard//f1fmlogo.png', width=200)
+
+
     st.stop()
 
+col1, col2 = st.columns([6,1], gap="xxsmall") 
+with col1:
+    st.markdown(f"# 🏎️ {year} {location} — {session_name}")
 
-st.markdown(f"# 🏎️ {year} {location} — {session_name}")
+with col2:
+    st.image('C://Users//moki2//Mazen Work//F1 dashboard//f1fmlogo.png', width=200)
+
+
 st.markdown("---")
 
 
@@ -133,14 +155,14 @@ bst_drivers = session.results.groupby('TeamName')['Abbreviation'].first().values
 driver_teams = session.results[['Abbreviation', 'TeamName']].set_index('Abbreviation').to_dict()['TeamName']
 all_drivers = driver_teams.keys()
 
-driver_color_map = {}
+# driver_color_map = {}
 driver_line_styles = {}
 for d in list(all_drivers):
     style = fastplt.get_driver_style(d, ['color', 'linestyle'], session=session)
     if style['linestyle'] == 'dashed':
         style['linestyle'] = 'dash'
     driver_line_styles[d]= style['linestyle']
-    driver_color_map[d] = style['color']
+    # driver_color_map[d] = style['color']
 
 
 
@@ -170,7 +192,7 @@ for driv in average_pace.index.to_list():
     keys[driv] = average_pace.index.to_list().index(driv)
 laps = laps.sort_values(by='Driver', key=lambda x: x.map(keys)).reset_index(drop=True)
 
-# driver_color_map = dict(zip(laps['Driver'], laps['color']))
+driver_color_map = dict(zip(laps['Driver'], laps['color']))
 
 
 
@@ -261,7 +283,7 @@ def pace_box(tcks = average_pace.index):
 
 
 st.plotly_chart(pace_box(tcks=create_ticks()))
-
+st.markdown("---")
 
 consistency = laps.pick_accurate().pick_quicklaps().groupby('Driver')['LapTime'].std().sort_values(ascending=False)
 def plotly_barh(values, index, title, xlbl, ylbl, xlim, color_map):
@@ -291,7 +313,7 @@ def plotly_barh(values, index, title, xlbl, ylbl, xlim, color_map):
 # )
 
     return fig
-max_speeds = laps.groupby('Driver')['SpeedST'].max().sort_values(ascending=True)
+max_speeds = laps.groupby('Driver')['SpeedST'].max().dropna().sort_values(ascending=True)
 
 
 
@@ -325,8 +347,11 @@ def apply_team_colors(column):
     # Map the team name to the hex code, default to empty string if not found
         return [f'background-color: {team_colors.get(t, "")}' for t in column]
 
+
+st.markdown('---')
 cols = st.columns(2)
 with cols[0]:
+    st.markdown(f'<h4> Fastest Laps of {ses_name}</h4>', unsafe_allow_html=True)
     st.dataframe(fastest20.style.apply(apply_team_colors, subset=['Team']))
 with cols[1]:
     # drivers = session.results.groupby('TeamName')['Abbreviation'].first().values
@@ -336,84 +361,96 @@ with cols[1]:
         title = 'Average Differnce from Best Pace'
         
     else:
-        df = session.laps.pick_drivers(bst_drivers)
-        best_teams = df[df['IsPersonalBest'] == True].groupby('Driver')['LapTime'].last().dt.total_seconds()
+        best_teams = laps.groupby('Team')['LapTime'].min()
         title = 'Lap Time Differnce from Fastest Car'
 
     best_teams = ((best_teams - best_teams.min())).sort_values(ascending=False)
     # best_teams = best_teams.sort_values(asc)
     best_teams_idx =  best_teams.index
     best_teams_vals = best_teams.values
-    if (ses_name != 'Race') and (ses_name != 'Sprint'):        
-        best_teams_idx = best_teams_idx.map(driver_teams)
 
     st.plotly_chart(plotly_barh(best_teams_vals, best_teams_idx, 
                 title,
                 'Lap Time Difference (s/L)', 'Teams', [0, best_teams_vals.max()], 
                 color_map=team_colors))
     
+if (ses_name == 'Race') or ses_name == 'Sprint':
+    lap_ends = session.laps
+    lap_ends['LapEndTime'] = lap_ends['LapStartTime'] + lap_ends['LapTime']
+    lap_ends['LapEndTime'] = lap_ends['LapEndTime'].dt.total_seconds()
+    lap_ends = lap_ends.groupby(['Driver', 'LapNumber'])['LapEndTime'].first().unstack()
 
-lap_ends = session.laps
-lap_ends['LapEndTime'] = lap_ends['LapStartTime'] + lap_ends['LapTime']
-lap_ends['LapEndTime'] = lap_ends['LapEndTime'].dt.total_seconds()
-lap_ends = lap_ends.groupby(['Driver', 'LapNumber'])['LapEndTime'].first().unstack()
+    idx_finish = session.results[session.results.Time.isnull() == False].Abbreviation.values
 
-idx_finish = session.results[session.results.Time.isnull() == False].Abbreviation.values
+    lap_ends.loc[idx_finish, :] = lap_ends.loc[idx_finish, :].interpolate('linear', axis=1)
+    lap_diff = (lap_ends.min() - lap_ends).T
+    lap_diff.reset_index(drop=True, inplace=True)
+    # lap_diff.index = lap_diff.index+1
 
-lap_ends.loc[idx_finish, :] = lap_ends.loc[idx_finish, :].interpolate('linear', axis=1)
-lap_diff = (lap_ends.min() - lap_ends).T
-lap_diff.reset_index(drop=True, inplace=True)
-lap_diff.index = lap_diff.index+1
+    fig = px.line(
+        lap_diff, 
+        x=lap_diff.index, 
+        y=lap_diff.columns,
+        color_discrete_map=driver_color_map
+    )
 
-fig = px.line(
-    lap_diff, 
-    x=lap_diff.index, 
-    y=lap_diff.columns,
-    color_discrete_map=driver_color_map
+    # Optional: Update axis labels if the index name is missing
+    fig.update_layout(xaxis_title="Lap Number", yaxis_title="Time Difference from leader",  hovermode="x unified")
+                    #   hovertemplate="<b>%{data.name} %{y}<extra></extra>")
+    fig.update_traces(hovertemplate="<b>%{data.name} Gap to leader: %{y}<extra></extra>")
+
+
+    driver_cols = list(lap_diff.columns) 
+
+    # If you are filtering columns in a loop or list comprehension:
+    desired_order = list(session.results.Abbreviation.values)
+    ordered_cols = [c for c in lap_diff.columns if c in desired_order]
+
+    # 3. Apply ordering and visibility logic
+    for trace in fig.data:
+        if trace.name in driver_line_styles:
+            trace.update(line=dict(dash=driver_line_styles[trace.name]))
+
+        if trace.name in desired_order:
+            # Set the rank based on the index in your list
+            trace.legendrank = desired_order.index(trace.name)
+        else:
+            # Drivers not in your list go to the end
+            trace.legendrank = 1000 
+        
+        # Hide all traces except the first one in your desired order
+        if trace.name != desired_order[0]:
+            trace.visible = 'legendonly'
+
+    # fig.update_layout(
+    #     template="plotly_dark",
+    #     legend=dict(bgcolor="#1a1a1a", bordercolor="#333"),
+    #     margin=dict(l=60, r=20, t=30, b=40),
+    #     hovermode="x",
+    #     hoverlabel=dict(
+    #         bgcolor="#1a1a1a",
+    #         bordercolor="#444",
+    #         font=dict(color="#f0f0f0", size=12),
+    #         namelength=-1,
+    #     ),
+    # )
+
+    st.markdown("---")
+    st.plotly_chart(fig)
+
+
+st.markdown("---")
+st.markdown(
+    "<center style='color:#aaaaaa;font-size:0.85rem;'>Data provided by <b>FastF1</b> · Built with <b>Streamlit</b> & <b>Plotly</b></center>",
+    unsafe_allow_html=True,
 )
 
-# Optional: Update axis labels if the index name is missing
-fig.update_layout(xaxis_title="Lap Number", yaxis_title="Time Difference from leader",  hovermode="x unified")
-                #   hovertemplate="<b>%{data.name} %{y}<extra></extra>")
-fig.update_traces(hovertemplate="<b>%{data.name} Gap to leader: %{y}<extra></extra>")
-
-
-driver_cols = list(lap_diff.columns) 
-
-# If you are filtering columns in a loop or list comprehension:
-desired_order = list(session.results.Abbreviation.values)
-ordered_cols = [c for c in lap_diff.columns if c in desired_order]
-
-# 3. Apply ordering and visibility logic
-for trace in fig.data:
-    if trace.name in driver_line_styles:
-        trace.update(line=dict(dash=driver_line_styles[trace.name]))
-
-    if trace.name in desired_order:
-        # Set the rank based on the index in your list
-        trace.legendrank = desired_order.index(trace.name)
-    else:
-        # Drivers not in your list go to the end
-        trace.legendrank = 1000 
-    
-    # Hide all traces except the first one in your desired order
-    if trace.name != desired_order[0]:
-        trace.visible = 'legendonly'
-
-# fig.update_layout(
-#     template="plotly_dark",
-#     legend=dict(bgcolor="#1a1a1a", bordercolor="#333"),
-#     margin=dict(l=60, r=20, t=30, b=40),
-#     hovermode="x",
-#     hoverlabel=dict(
-#         bgcolor="#1a1a1a",
-#         bordercolor="#444",
-#         font=dict(color="#f0f0f0", size=12),
-#         namelength=-1,
-#     ),
-# )
-
-
-st.plotly_chart(fig)
-
+st.markdown(
+    "<center style='color:#555;font-size:0.8rem;'>" \
+    "This is an unofficial, non-commercial project and "
+    "is not affiliated with the FIA or Formula 1. All F1-related trademarks"
+    " and copyrights belong to their respective owners."
+    "</center>",
+    unsafe_allow_html=True,
+)
 
