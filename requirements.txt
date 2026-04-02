@@ -1,9 +1,6 @@
 fastf1
 pandas
 numpy
-warnings
-concurrent.futures
-datetime
 plotly
 matplotlib
 streamlit
