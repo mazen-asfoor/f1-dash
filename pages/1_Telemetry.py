@@ -28,7 +28,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.logo('C://Users//moki2//Mazen Work//F1 dashboard//f1fmlogo.png', size="large")
+st.logo('f1fmlogo.png', size="large")
 
 # ── Styling ────────────────────────────────────────────────────────────────────
 # st.markdown("""
@@ -372,7 +372,7 @@ if session is None:
         """, unsafe_allow_html=True)
 
     with col2:
-        st.image('C://Users//moki2//Mazen Work//F1 dashboard//f1fmlogo.png', width=200)
+        st.image('f1fmlogo.png', width=200)
 
 
     st.stop()
@@ -390,7 +390,7 @@ with col1:
     st.markdown(f"# 🏎️ {year} {location} — {session_name} Telemetry")
 
 with col2:
-    st.image('C://Users//moki2//Mazen Work//F1 dashboard//f1fmlogo.png', width=200)
+    st.image('f1fmlogo.png', width=200)
 
 
 st.markdown("---")

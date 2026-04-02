@@ -28,7 +28,7 @@ fastf1.Cache.enable_cache(CACHE_DIR)
 
 st.set_page_config(page_title="Pace Analysis", page_icon="📈", layout="wide")
 
-st.logo('C://Users//moki2//Mazen Work//F1 dashboard//f1fmlogo.png', size="large")
+st.logo('f1fmlogo.png', size="large")
 
 
 # st.markdown("# Pace Analysis")
@@ -135,7 +135,7 @@ if session is None:
         """, unsafe_allow_html=True)
 
     with col2:
-        st.image('C://Users//moki2//Mazen Work//F1 dashboard//f1fmlogo.png', width=200)
+        st.image('f1fmlogo.png', width=200)
 
 
     st.stop()
@@ -145,7 +145,7 @@ with col1:
     st.markdown(f"# 🏎️ {year} {location} — {session_name}")
 
 with col2:
-    st.image('C://Users//moki2//Mazen Work//F1 dashboard//f1fmlogo.png', width=200)
+    st.image('f1fmlogo.png', width=200)
 
 
 st.markdown("---")
