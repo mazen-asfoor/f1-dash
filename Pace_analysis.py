@@ -6,6 +6,7 @@ import fastf1.plotting as fastplt
 import plotly.express as px
 import numpy as np
 import datetime
+import os
 
 
 
@@ -21,7 +22,9 @@ import datetime
 # </style>
 # """, unsafe_allow_html=True)
 
-fastf1.Cache.enable_cache('cache')
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+fastf1.Cache.enable_cache(CACHE_DIR)
 
 st.set_page_config(page_title="Pace Analysis", page_icon="📈", layout="wide")
 

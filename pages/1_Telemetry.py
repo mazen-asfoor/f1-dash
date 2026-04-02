@@ -9,7 +9,6 @@ from plotly.subplots import make_subplots
 import plotly.express as px
 from matplotlib import colormaps
 import warnings
-# from scipy.ndimage import uniform_filter1d
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import datetime
 import os
@@ -303,7 +302,9 @@ def build_laps_df(year: int, location: str, session_name: str, driver_abbr: str)
 
 
 
-fastf1.Cache.enable_cache('cache')
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+fastf1.Cache.enable_cache(CACHE_DIR)
 
 for key, default in [
     ("session", None),
