@@ -16,9 +16,9 @@ import os
 warnings.filterwarnings("ignore")
 
 # ── Cache dir ──────────────────────────────────────────────────────────────────
-# CACHE_DIR = "./f1_cache"
-# os.makedirs(CACHE_DIR, exist_ok=True)
-# fastf1.Cache.enable_cache(CACHE_DIR)
+CACHE_DIR = "/tmp/f1_cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
+fastf1.Cache.enable_cache(CACHE_DIR)
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(

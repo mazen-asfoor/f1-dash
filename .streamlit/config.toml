@@ -3,11 +3,7 @@ base = "dark"
 
 [server]
 headless = true
-```
+maxUploadSize = 50
 
-**`.gitignore`** — important, the cache folder can get huge:
-```
-cache/
-__pycache__/
-*.pyc
-.env
+[runner]
+fastReruns = true
