@@ -22,7 +22,7 @@ import os
 # </style>
 # """, unsafe_allow_html=True)
 
-CACHE_DIR = "/tmp/f1_cache"
+CACHE_DIR = "/f1_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 fastf1.Cache.enable_cache(CACHE_DIR)
 
@@ -109,6 +109,7 @@ load_btn = st.sidebar.button("🔄 Load Session", width="stretch")
 # LOAD SESSION
 # ══════════════════════════════════════════════════════════════════════════════
 if load_btn:
+    st.cache_data.clear()
     with st.spinner("Fetching data from FastF1…"):
         st.session_state.session = load_session(year, location, session_name)
         st.session_state.selected_drivers = []

@@ -3,7 +3,7 @@ base = "dark"
 
 [server]
 headless = true
-maxUploadSize = 50
+maxUploadSize = 400
 
 [runner]
 fastReruns = true

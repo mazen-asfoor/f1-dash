@@ -16,7 +16,7 @@ import os
 warnings.filterwarnings("ignore")
 
 # ── Cache dir ──────────────────────────────────────────────────────────────────
-CACHE_DIR = "/tmp/f1_cache"
+CACHE_DIR = "/f1_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 fastf1.Cache.enable_cache(CACHE_DIR)
 
@@ -342,6 +342,7 @@ st.session_state.selected_session_index = session_types.index(ses_name)
 load_btn = st.sidebar.button("🔄 Load Session", width="stretch")
 
 if load_btn:
+    st.cache_data.clear()
     # st.markdown(f"# 🏎️ {year} {location} — {session_name}")
     with st.spinner("Fetching data from FastF1…"):
         st.session_state.session = load_session(year, location, session_name)
