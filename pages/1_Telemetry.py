@@ -16,7 +16,7 @@ import os
 warnings.filterwarnings("ignore")
 
 # ── Cache dir ──────────────────────────────────────────────────────────────────
-CACHE_DIR = "/f1_cache"
+CACHE_DIR = "/tmp/f1_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 fastf1.Cache.enable_cache(CACHE_DIR)
 
@@ -302,9 +302,9 @@ def build_laps_df(year: int, location: str, session_name: str, driver_abbr: str)
 
 
 
-CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
-os.makedirs(CACHE_DIR, exist_ok=True)
-fastf1.Cache.enable_cache(CACHE_DIR)
+# CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
+# os.makedirs(CACHE_DIR, exist_ok=True)
+# fastf1.Cache.enable_cache(CACHE_DIR)
 
 for key, default in [
     ("session", None),

@@ -22,7 +22,7 @@ import os
 # </style>
 # """, unsafe_allow_html=True)
 
-CACHE_DIR = "/f1_cache"
+CACHE_DIR = "/tmp/f1_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 fastf1.Cache.enable_cache(CACHE_DIR)
 
